@@ -46,6 +46,8 @@ import com.spotify.docker.client.exceptions.DockerException;
 import com.spotify.docker.client.messages.RegistryAuth;
 import com.spotify.docker.client.messages.RegistryConfigs;
 import java.io.IOException;
+import java.util.Collection;
+import java.util.Collections;
 import org.hamcrest.FeatureMatcher;
 import org.hamcrest.Matcher;
 import org.joda.time.DateTime;
@@ -64,6 +66,7 @@ public class ContainerRegistryAuthSupplierTest {
   private final String tokenValue = new String(encode("test-username:test-password".getBytes()));
 
   private AmazonECR ecrClient = mock(AmazonECR.class);
+  private Collection<String> registryIds = Collections.emptyList();
 
   private final AuthorizationData authData1 = new AuthorizationData()
       .withAuthorizationToken(tokenValue).withExpiresAt(expiration.toDate())
@@ -71,9 +74,10 @@ public class ContainerRegistryAuthSupplierTest {
 
   private final Clock clock = mock(Clock.class);
   private final int minimumExpirationSecs = 30;
-  private final EcrCredentials credentials = spy(new EcrCredentials(ecrClient, authData1));
+  private final EcrCredentials credentials = spy(new EcrCredentials(ecrClient, authData1,
+      registryIds));
   private final ContainerRegistryAuthSupplier supplier = spy(new ContainerRegistryAuthSupplier(
-      ecrClient, clock, minimumExpirationSecs, credentials));
+      clock, minimumExpirationSecs, credentials));
 
   private static Matcher<RegistryAuth> matchesAccessToken(final AuthorizationData accessToken) {
     String decoded = new String(Base64.decode(accessToken.getAuthorizationToken()));

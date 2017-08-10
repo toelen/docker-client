@@ -27,6 +27,7 @@ import com.amazonaws.services.ecr.model.AuthorizationData;
 import com.amazonaws.services.ecr.model.GetAuthorizationTokenRequest;
 import com.amazonaws.services.ecr.model.GetAuthorizationTokenResult;
 import java.io.IOException;
+import java.util.Collection;
 
 /**
  * Makes getting the authorization data easier.
@@ -34,15 +35,18 @@ import java.io.IOException;
 class EcrCredentials {
 
   private final AmazonECR ecr;
+  private final Collection<String> registryIds;
   private AuthorizationData authorizationData;
 
-  EcrCredentials(final AmazonECR ecr) {
-    this(ecr, null);
+  EcrCredentials(final AmazonECR ecr, final Collection<String> registryIds) {
+    this(ecr, null, registryIds);
   }
 
-  EcrCredentials(final AmazonECR ecr, final AuthorizationData authorizationData) {
+  EcrCredentials(final AmazonECR ecr, final AuthorizationData authorizationData,
+                 final Collection<String> registryIds) {
     this.ecr = ecr;
     this.authorizationData = authorizationData;
+    this.registryIds = registryIds;
   }
 
   public AuthorizationData getAuthorizationData() {
@@ -51,7 +55,7 @@ class EcrCredentials {
 
   void refresh() throws IOException {
     GetAuthorizationTokenResult authorizationToken = ecr
-        .getAuthorizationToken(new GetAuthorizationTokenRequest());
+        .getAuthorizationToken(new GetAuthorizationTokenRequest().withRegistryIds(registryIds));
     checkState(authorizationToken != null, "Unable to get auth token result from ECR");
 
     AuthorizationData data = authorizationToken.getAuthorizationData().get(0);

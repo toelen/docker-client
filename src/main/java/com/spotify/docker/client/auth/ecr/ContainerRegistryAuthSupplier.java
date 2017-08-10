@@ -35,8 +35,11 @@ import com.spotify.docker.client.messages.RegistryAuth;
 import com.spotify.docker.client.messages.RegistryConfigs;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
@@ -80,6 +83,7 @@ public class ContainerRegistryAuthSupplier implements RegistryAuthSupplier {
 
     private final AmazonECR ecr;
     private long minimumExpiryMillis = TimeUnit.MINUTES.toMillis(1);
+    private final Collection<String> registryIds = new LinkedList<>();
 
     public Builder(final AmazonECR ecr) {
       this.ecr = ecr;
@@ -95,15 +99,23 @@ public class ContainerRegistryAuthSupplier implements RegistryAuthSupplier {
       return this;
     }
 
+    /**
+     * Changes the minimum expiry time used to refresh AccessTokens before they expire. The default
+     * value is one minute.
+     */
+    public Builder withRegistryId(String registryId) {
+      this.registryIds.add(registryId);
+
+      return this;
+    }
+
     public ContainerRegistryAuthSupplier build() {
       final Clock clock = Clock.SYSTEM;
 
-      return new ContainerRegistryAuthSupplier(ecr, clock, minimumExpiryMillis,
-          new EcrCredentials(ecr));
+      return new ContainerRegistryAuthSupplier(clock, minimumExpiryMillis,
+          new EcrCredentials(ecr, registryIds));
     }
   }
-
-  private final AmazonECR ecr;
 
   // TODO (mbrown): change to java.time.Clock once on Java 8
   private final Clock clock;
@@ -111,22 +123,20 @@ public class ContainerRegistryAuthSupplier implements RegistryAuthSupplier {
   private final long minimumExpiryMillis;
 
   @VisibleForTesting
-  ContainerRegistryAuthSupplier(final AmazonECR ecr, final Clock clock,
+  ContainerRegistryAuthSupplier(final Clock clock,
                                 final long minimumExpiryMillis, final EcrCredentials credentials) {
-    Preconditions.checkArgument(ecr != null, "ecr");
-    this.ecr = ecr;
     this.clock = clock;
     this.minimumExpiryMillis = minimumExpiryMillis;
     this.credentials = credentials;
   }
 
   /**
-   * Get an accessToken to use, possibly refreshing the token if it expires within the
+   * Get an AuthorizationData to use, possibly refreshing the token if it expires within the
    * minimumExpiryMillis.
    */
-  private AuthorizationData getAccessToken() throws IOException {
+  private AuthorizationData getAuthorizationData() throws IOException {
     // synchronize attempts to refresh the accessToken
-    synchronized (ecr) {
+    synchronized (credentials) {
       if (needsRefresh(credentials.getAuthorizationData())) {
         credentials.refresh();
       }
@@ -167,15 +177,15 @@ public class ContainerRegistryAuthSupplier implements RegistryAuthSupplier {
       return null;
     }
 
-    final AuthorizationData accessToken;
+    final AuthorizationData authorizationData;
 
     try {
-      accessToken = getAccessToken();
+      authorizationData = getAuthorizationData();
     } catch (IOException e) {
       throw new DockerException(e);
     }
 
-    return authForAuthorizationData(accessToken);
+    return authForAuthorizationData(authorizationData);
   }
 
   // see http://docs.aws.amazon.com/AmazonECR/latest/APIReference/API_AuthorizationData.html
@@ -184,20 +194,24 @@ public class ContainerRegistryAuthSupplier implements RegistryAuthSupplier {
       throw new IllegalArgumentException();
     }
 
-    String decoded = new String(Base64.decode(accessToken.getAuthorizationToken()), UTF_8);
-    String username = decoded.split(":")[0];
-    String password = decoded.split(":")[1];
+    String[] decoded = new String(Base64.decode(accessToken.getAuthorizationToken()), UTF_8)
+        .split(":");
+    String username = decoded[0];
+    String password = decoded[1];
 
-    return RegistryAuth.builder().username(username).password(password)
-        .serverAddress(accessToken.getProxyEndpoint()).build();
+    return RegistryAuth.builder()
+        .username(username)
+        .password(password)
+        .serverAddress(accessToken.getProxyEndpoint())
+        .build();
   }
 
   @Override
   public RegistryAuth authForSwarm() throws DockerException {
-    final AuthorizationData accessToken;
+    final AuthorizationData authorizationData;
 
     try {
-      accessToken = getAccessToken();
+      authorizationData = getAuthorizationData();
     } catch (IOException e) {
       // ignore the exception, as the user may not care if swarm is authenticated to use GCR
       log.warn("unable to get access token for AWS Elastic Container Registry due to exception, "
@@ -206,17 +220,17 @@ public class ContainerRegistryAuthSupplier implements RegistryAuthSupplier {
       return null;
     }
 
-    return authForAuthorizationData(accessToken);
+    return authForAuthorizationData(authorizationData);
   }
 
   @Override
   public RegistryConfigs authForBuild() throws DockerException {
-    final AuthorizationData accessToken;
+    final AuthorizationData authorizationData;
 
     try {
-      accessToken = getAccessToken();
+      authorizationData = getAuthorizationData();
     } catch (IOException e) {
-      // do not fail as the GCR access token may not be necessary for building the image
+      // do not fail as the ecr auth data may not be necessary for building the image
       // currently
       // being built
       log.warn("unable to get access token for AWS Elastic Container Registry, "
@@ -226,7 +240,7 @@ public class ContainerRegistryAuthSupplier implements RegistryAuthSupplier {
     }
 
     final Map<String, RegistryAuth> configs = new HashMap<String, RegistryAuth>(1);
-    configs.put(accessToken.getProxyEndpoint(), authForAuthorizationData(accessToken));
+    configs.put(authorizationData.getProxyEndpoint(), authForAuthorizationData(authorizationData));
 
     return RegistryConfigs.create(configs);
   }
