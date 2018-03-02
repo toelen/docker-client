@@ -156,12 +156,6 @@ public class ContainerRegistryAuthSupplier implements RegistryAuthSupplier {
     }
 
     final Date expirationTime = accessToken.getExpiresAt();
-
-    // Don't refresh if expiration time hasn't been provided.
-    if (expirationTime == null) {
-      return true;
-    }
-
     // refresh the token if it expires "soon"
     final long expiresIn = expirationTime.getTime() - clock.currentTimeMillis();
 

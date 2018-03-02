@@ -28,26 +28,21 @@ import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.Assert.assertThat;
-import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.amazonaws.services.ecr.AmazonECR;
 import com.amazonaws.services.ecr.model.AuthorizationData;
-import com.amazonaws.services.ecr.model.GetAuthorizationTokenRequest;
-import com.amazonaws.services.ecr.model.GetAuthorizationTokenResult;
 import com.amazonaws.util.Base64;
 import com.google.api.client.util.Clock;
 import com.spotify.docker.client.exceptions.DockerException;
 import com.spotify.docker.client.messages.RegistryAuth;
 import com.spotify.docker.client.messages.RegistryConfigs;
 import java.io.IOException;
-import java.util.Collection;
-import java.util.Collections;
+import java.util.concurrent.TimeUnit;
 import org.hamcrest.FeatureMatcher;
 import org.hamcrest.Matcher;
 import org.joda.time.DateTime;
@@ -55,7 +50,6 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
-import org.mockito.Matchers;
 
 public class ContainerRegistryAuthSupplierTest {
 
@@ -65,8 +59,7 @@ public class ContainerRegistryAuthSupplierTest {
   private final DateTime expiration = new DateTime(2017, 5, 23, 16, 25);
   private final String tokenValue = new String(encode("test-username:test-password".getBytes()));
 
-  private AmazonECR ecrClient = mock(AmazonECR.class);
-  private Collection<String> registryIds = Collections.emptyList();
+  private final AmazonECR ecrClient = mock(AmazonECR.class);
 
   private final AuthorizationData authData1 = new AuthorizationData()
       .withAuthorizationToken(tokenValue).withExpiresAt(expiration.toDate())
@@ -74,10 +67,9 @@ public class ContainerRegistryAuthSupplierTest {
 
   private final Clock clock = mock(Clock.class);
   private final int minimumExpirationSecs = 30;
-  private final EcrCredentials credentials = spy(new EcrCredentials(ecrClient, authData1,
-      registryIds));
-  private final ContainerRegistryAuthSupplier supplier = spy(new ContainerRegistryAuthSupplier(
-      clock, minimumExpirationSecs, credentials));
+  private final EcrCredentials credentials = mock(EcrCredentials.class);
+  private final ContainerRegistryAuthSupplier supplier = new ContainerRegistryAuthSupplier(
+      clock, TimeUnit.SECONDS.toMillis(minimumExpirationSecs), credentials);
 
   private static Matcher<RegistryAuth> matchesAccessToken(final AuthorizationData accessToken) {
     String decoded = new String(Base64.decode(accessToken.getAuthorizationToken()));
@@ -105,10 +97,7 @@ public class ContainerRegistryAuthSupplierTest {
 
   @Before
   public void before() {
-    GetAuthorizationTokenResult res = new GetAuthorizationTokenResult()
-        .withAuthorizationData(authData1);
-    doReturn(res).when(ecrClient).getAuthorizationToken(
-        Matchers.any(GetAuthorizationTokenRequest.class));
+    when(credentials.getAuthorizationData()).thenReturn(authData1);
   }
 
   @Test
@@ -125,7 +114,8 @@ public class ContainerRegistryAuthSupplierTest {
 
   @Test
   public void testAuthForImage_RefreshNeeded() throws Exception {
-    doReturn(true).when(supplier).needsRefresh(Matchers.any(AuthorizationData.class));
+    when(clock.currentTimeMillis())
+        .thenReturn(expiration.minusSeconds(minimumExpirationSecs - 1).getMillis());
 
     assertThat(
         supplier.authFor("1234567890.dkr.ecr.eu-west-1.amazonaws.com/foobar/barfoo:latest"),
@@ -136,7 +126,8 @@ public class ContainerRegistryAuthSupplierTest {
 
   @Test
   public void testAuthForImage_TokenExpired() throws Exception {
-    doReturn(true).when(supplier).needsRefresh(Matchers.any(AuthorizationData.class));
+    when(clock.currentTimeMillis())
+        .thenReturn(expiration.minusSeconds(minimumExpirationSecs - 1).getMillis());
 
     assertThat(
         supplier.authFor("1234567890.dkr.ecr.eu-west-1.amazonaws.com/foobar/barfoo:latest"),
@@ -152,7 +143,8 @@ public class ContainerRegistryAuthSupplierTest {
 
   @Test
   public void testAuthForImage_ExceptionOnRefresh() throws Exception {
-    doReturn(true).when(supplier).needsRefresh(Matchers.any(AuthorizationData.class));
+    when(clock.currentTimeMillis())
+        .thenReturn(expiration.minusSeconds(minimumExpirationSecs - 1).getMillis());
 
     final IOException ex = new IOException("failure!!");
     doThrow(ex).when(credentials).refresh();
@@ -166,7 +158,8 @@ public class ContainerRegistryAuthSupplierTest {
 
   @Test
   public void testAuthForSwarm_NoRefresh() throws Exception {
-    doReturn(false).when(supplier).needsRefresh(Matchers.any(AuthorizationData.class));
+    when(clock.currentTimeMillis())
+        .thenReturn(expiration.minusSeconds(minimumExpirationSecs + 1).getMillis());
 
     assertThat(supplier.authForSwarm(), matchesAccessToken(authData1));
 
@@ -175,7 +168,8 @@ public class ContainerRegistryAuthSupplierTest {
 
   @Test
   public void testAuthForSwarm_RefreshNeeded() throws Exception {
-    doReturn(true).when(supplier).needsRefresh(Matchers.any(AuthorizationData.class));
+    when(clock.currentTimeMillis())
+        .thenReturn(expiration.minusSeconds(minimumExpirationSecs - 1).getMillis());
 
     assertThat(supplier.authForSwarm(), matchesAccessToken(authData1));
 
@@ -184,7 +178,8 @@ public class ContainerRegistryAuthSupplierTest {
 
   @Test
   public void testAuthForSwarm_ExceptionOnRefresh() throws Exception {
-    doReturn(true).when(supplier).needsRefresh(Matchers.any(AuthorizationData.class));
+    when(clock.currentTimeMillis())
+        .thenReturn(expiration.minusSeconds(minimumExpirationSecs - 1).getMillis());
 
     doThrow(new IOException("failure!!")).when(credentials).refresh();
 
@@ -193,7 +188,8 @@ public class ContainerRegistryAuthSupplierTest {
 
   @Test
   public void testAuthForBuild_NoRefresh() throws Exception {
-    doReturn(false).when(supplier).needsRefresh(Matchers.any(AuthorizationData.class));
+    when(clock.currentTimeMillis())
+        .thenReturn(expiration.minusSeconds(minimumExpirationSecs + 1).getMillis());
 
     final RegistryConfigs configs = supplier.authForBuild();
     assertThat(configs.configs().values(), is(not(empty())));
@@ -204,7 +200,8 @@ public class ContainerRegistryAuthSupplierTest {
 
   @Test
   public void testAuthForBuild_RefreshNeeded() throws Exception {
-    doReturn(true).when(supplier).needsRefresh(Matchers.any(AuthorizationData.class));
+    when(clock.currentTimeMillis())
+        .thenReturn(expiration.minusSeconds(minimumExpirationSecs - 1).getMillis());
 
     final RegistryConfigs configs = supplier.authForBuild();
     assertThat(configs.configs().values(), is(not(empty())));
@@ -215,7 +212,8 @@ public class ContainerRegistryAuthSupplierTest {
 
   @Test
   public void testAuthForBuild_ExceptionOnRefresh() throws Exception {
-    doReturn(true).when(supplier).needsRefresh(Matchers.any(AuthorizationData.class));
+    when(clock.currentTimeMillis())
+        .thenReturn(expiration.minusSeconds(minimumExpirationSecs - 1).getMillis());
 
     doThrow(new IOException("failure!!")).when(credentials).refresh();
 
