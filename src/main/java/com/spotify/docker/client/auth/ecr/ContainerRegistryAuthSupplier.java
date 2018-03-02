@@ -240,7 +240,7 @@ public class ContainerRegistryAuthSupplier implements RegistryAuthSupplier {
       return RegistryConfigs.empty();
     }
 
-    final Map<String, RegistryAuth> configs = new HashMap<String, RegistryAuth>(1);
+    final Map<String, RegistryAuth> configs = new HashMap<>(1);
     configs.put(authorizationData.getProxyEndpoint(), authForAuthorizationData(authorizationData));
 
     return RegistryConfigs.create(configs);
