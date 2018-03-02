@@ -53,9 +53,10 @@ public class ContainerRegistryAuthSupplier implements RegistryAuthSupplier {
   private static final Logger log = LoggerFactory.getLogger(ContainerRegistryAuthSupplier.class);
 
   /**
-   * Constructs a ContainerRegistryAuthSupplier using the Application Default Credentials.
+   * Constructs a ContainerRegistryAuthSupplier using the default AWS credentials.
    *
    * @see Builder
+   * @see AmazonECRClientBuilder#defaultClient()
    */
   public static Builder forDefaultClient() throws IOException {
     return new Builder(AmazonECRClientBuilder.defaultClient());
